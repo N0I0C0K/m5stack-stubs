@@ -1,0 +1,48 @@
+version = 1
+revision = 2
+requires-python = ">=3.11"
+
+[[package]]
+name = "m5stubgen"
+version = "0.1.0"
+source = { editable = "." }
+
+[package.optional-dependencies]
+device = [
+    { name = "mpremote" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "mpremote", marker = "extra == 'device'", specifier = ">=1.20" }]
+provides-extras = ["device"]
+
+[[package]]
+name = "mpremote"
+version = "1.28.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "platformdirs" },
+    { name = "pyserial" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/20/1b/d008342d1b018fb60e1196bf72a164ea71a567f924db11934f0e3a0a10bc/mpremote-1.28.0.tar.gz", hash = "sha256:fdb5626be83dff4e53c0184f8950814cb519b524dba7f1f8b1668aa477257a31", size = 31412, upload-time = "2026-04-06T13:21:14.976Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0f/d7/634a63290002a9df2708e05983fc769447d64f074ac2e8d8990316c70fd0/mpremote-1.28.0-py3-none-any.whl", hash = "sha256:2df2a50f3c8098cae8c732dbf2541e7e58185e7896513b45d05196901e049334", size = 36098, upload-time = "2026-04-06T13:21:13.368Z" },
+]
+
+[[package]]
+name = "platformdirs"
+version = "4.10.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d7/47/e4501f49c178ae1d9f4a75073fda4204f52647993f075a9db4d14930e0c5/platformdirs-4.10.0.tar.gz", hash = "sha256:31e761a6a0ca04faf7353ea759bdba55652be214725111e5aac52dfa29d4bef7", size = 31224, upload-time = "2026-05-28T03:32:53.587Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/81/e6/cd9575ac904136b3cbf7aa7ee819ef86eedb7274e46f230e94ea4342e729/platformdirs-4.10.0-py3-none-any.whl", hash = "sha256:fb516cdb12eb0d857d0cd85a7c57cea4d060bee4578d6cf5a14dfdf8cbf8784a", size = 22743, upload-time = "2026-05-28T03:32:52.175Z" },
+]
+
+[[package]]
+name = "pyserial"
+version = "3.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/1e/7d/ae3f0a63f41e4d2f6cb66a5b57197850f919f59e558159a4dd3a818f5082/pyserial-3.5.tar.gz", hash = "sha256:3c77e014170dfffbd816e6ffc205e9842efb10be9f58ec16d3e8675b4925cddb", size = 159125, upload-time = "2020-11-23T03:59:15.045Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/bc/587a445451b253b285629263eb51c2d8e9bcea4fc97826266d186f96f558/pyserial-3.5-py2.py3-none-any.whl", hash = "sha256:c4451db6ba391ca6ca299fb3ec7bae67a5c55dde170964c7a14ceefec02f2cf0", size = 90585, upload-time = "2020-11-23T03:59:13.41Z" },
+]

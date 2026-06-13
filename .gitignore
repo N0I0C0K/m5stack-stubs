@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info/
+
+# Virtual envs
+.venv/
+
+# Fetched firmware source (re-download with `m5stubgen fetch`)
+/vendor/
+
+# Generated stub output (regenerate with `m5stubgen gen`)
+/out/
+
+# Stub package payload (generated into stubpkg/) + build artifacts
+/stubpkg/*.pyi
+/stubpkg/unit/
+/stubpkg/hardware/
+/stubpkg/driver/
+/dist/
+/stubpkg/dist/

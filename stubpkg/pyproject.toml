@@ -1,0 +1,31 @@
+[project]
+name = "m5stack-stubs"
+version = "0.0.0"  # set from the release tag in CI
+description = "Type stubs (.pyi) for the M5Stack UIFlow2 MicroPython firmware — M5 module"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+authors = [{ name = "N0I0C0K" }]
+keywords = ["m5stack", "uiflow", "micropython", "stubs", "pyi", "pylance", "type-stubs", "cardputer"]
+classifiers = [
+    "Typing :: Stubs Only",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+]
+
+[project.urls]
+Homepage = "https://github.com/N0I0C0K/m5stack-stubs"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Ship the generated .pyi flat at the site-packages root (mirrors micropython-*-stubs),
+# so `import M5` resolves the stub. Files are produced by `m5stubgen gen --out stubpkg`.
+[tool.hatch.build.targets.wheel]
+include = ["*.pyi", "unit/", "hardware/", "driver/"]
+[tool.hatch.build.targets.wheel.force-include]
+"M5.pyi" = "M5.pyi"
+
+[tool.hatch.build.targets.sdist]
+include = ["*.pyi", "unit/", "hardware/", "driver/", "README.md"]

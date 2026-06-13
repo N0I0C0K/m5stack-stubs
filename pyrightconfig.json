@@ -1,0 +1,6 @@
+{
+    "include": ["tests"],
+    "stubPath": "out",
+    "typeCheckingMode": "basic",
+    "reportMissingModuleSource": "none"
+}
