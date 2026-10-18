@@ -97,25 +97,29 @@ jobs:
           packages-dir: dist/
 
       - name: Verify published package
-        if: steps.plan.outputs.publish == 'true'
+        if: steps.plan.outputs.verify == 'true'
         env:
           PACKAGE_VERSION: ${{ steps.plan.outputs.version }}
           FIRMWARE_REF: ${{ steps.plan.outputs.ref }}
         run: |
-          uv pip install --target published --no-deps --no-cache --index-url https://pypi.org/simple "m5stack-stubs==$PACKAGE_VERSION"
+          uv run python -m m5stubgen.upstream install-published "$PACKAGE_VERSION"
           uv run python tests/verify_distribution.py published/M5.pyi --firmware-ref "$FIRMWARE_REF"
 
       # GITHUB_TOKEN-created releases do not trigger another release workflow.
       - name: Record upstream release
-        if: steps.plan.outputs.publish == 'true' && steps.plan.outputs.automatic == 'true'
+        if: steps.plan.outputs.record == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.plan.outputs.release_tag }}
           FIRMWARE_REF: ${{ steps.plan.outputs.ref }}
           PACKAGE_VERSION: ${{ steps.plan.outputs.version }}
         run: |
+          if gh release view "$RELEASE_TAG" --json tagName > /dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; leaving it unchanged."
+            exit 0
+          fi
           gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" \
             --title "$PACKAGE_VERSION (UIFlow2 $FIRMWARE_REF)" \
-            --notes "Generated and validated from official firmware [$FIRMWARE_REF](https://github.com/m5stack/uiflow-micropython/releases/tag/$FIRMWARE_REF). Published to [PyPI](https://pypi.org/project/m5stack-stubs/$PACKAGE_VERSION/). Build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+            --notes "Generated and validated from official firmware [$FIRMWARE_REF](https://github.com/m5stack/uiflow-micropython/releases/tag/$FIRMWARE_REF). Published to [PyPI](https://pypi.org/project/m5stack-stubs/$PACKAGE_VERSION/). Verification run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
 
           <!-- m5stubgen-firmware: $FIRMWARE_REF -->"

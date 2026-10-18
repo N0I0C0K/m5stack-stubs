@@ -60,16 +60,19 @@ latest stable firmware is synchronized; historical releases are not backfilled.
 Each new version is fetched by its exact tag, then the workflow runs binding
 regressions, pyright, and wheel checks before publishing with PyPI Trusted
 Publishing. The installed PyPI package is checked again, and a GitHub Release
-records the firmware tag and build link. The stub header records the firmware
+records the firmware tag and verification link. The stub header records the firmware
 tag and resolved source commit. All runs share a concurrency lock.
 
 If PyPI already contains that firmware version (including a `.postN` correction)
 or a newer stable version, the check exits without building or publishing.
+When the exact current version is already available, publishing-enabled runs
+verify it and create its GitHub Release record if missing, without uploading it
+again. This recovers interrupted post-upload verification on the next run.
 Network/API failures stop the run rather than assuming a version is missing.
 Failed builds/uploads can be retried on the next daily run or manually; existing
-PyPI versions are never overwritten. If uploading succeeded but a later check or
-GitHub Release creation failed, inspect that run and repair its metadata manually
-instead of republishing the same version.
+PyPI versions are never overwritten. Post-upload installation retries for up to
+five minutes to allow PyPI index propagation. Persistent failures stop the run
+and are retried at the next check; inspect the logs for genuine package errors.
 
 To preview the next synchronization without publishing:
 

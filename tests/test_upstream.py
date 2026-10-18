@@ -6,13 +6,14 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 from tempfile import TemporaryDirectory
 import tomllib
 from unittest import TestCase
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from m5stubgen.upstream import fetch_json, main, plan_release, set_version, version_key
+from m5stubgen.upstream import fetch_json, install_published, main, plan_release, set_version, version_key
 
 
 def _release(tag: str = "2.5.3", **kwargs):
@@ -22,6 +23,7 @@ def _release(tag: str = "2.5.3", **kwargs):
 def test_daily_schedule_publishes_new_stable_version() -> None:
     plan = plan_release("schedule", {}, _release(), ["0.1.0", "0.1.1"])
     assert plan.build and plan.publish and plan.automatic
+    assert plan.verify and plan.record
     assert plan.ref == "2.5.3" and plan.version == "2.5.3"
     assert plan.outputs()["release_tag"] == "v2.5.3"
     assert plan.outputs()["publish"] == "true"
@@ -41,6 +43,16 @@ def test_published_versions_and_post_releases_are_skipped() -> None:
     for published in (["2.5.3"], ["2.5.3.post1"], ["2.5.4"], ["3.0.0"]):
         plan = plan_release("schedule", {}, _release(), published)
         assert not plan.build and not plan.publish
+        if published != ["2.5.3"]:
+            assert not plan.verify and not plan.record
+
+
+def test_completed_upload_can_recover_without_republishing() -> None:
+    plan = plan_release("schedule", {}, _release(), ["2.5.3"])
+    assert not plan.build and not plan.publish
+    assert plan.verify and plan.record
+    dry_run = plan_release("workflow_dispatch", {"inputs": {"sync_upstream": True}}, _release(), ["2.5.3"])
+    assert not dry_run.build and not dry_run.publish and not dry_run.verify and not dry_run.record
 
 
 def test_pypi_prereleases_do_not_suppress_new_stable_versions() -> None:
@@ -87,6 +99,7 @@ def test_publish_switch_applies_to_all_triggers() -> None:
     for name, event in events:
         plan = plan_release(name, event, _release(), publish_enabled=False)
         assert plan.build and not plan.publish
+        assert not plan.verify and not plan.record
 
 
 def test_manual_release_supports_pinned_firmware_and_post_fix() -> None:
@@ -152,6 +165,32 @@ def test_set_version_validates_and_preserves_project_metadata() -> None:
         path.write_text(original.replace('"m5stack-stubs"', '"other"'), encoding="utf-8")
         with TestCase().assertRaises(ValueError):
             set_version(path, "2.5.3")
+
+
+def test_pypi_install_retries_index_propagation() -> None:
+    failure = subprocess.CalledProcessError(1, ["uv"])
+    with patch("m5stubgen.upstream.subprocess.run", side_effect=[failure, failure, None]) as run, \
+         patch("m5stubgen.upstream.time.sleep") as sleep, redirect_stdout(io.StringIO()):
+        install_published("2.5.3", Path("published"))
+    assert run.call_count == 3 and sleep.call_count == 2
+    command = run.call_args.args[0]
+    assert "--no-cache" in command and command[-1] == "m5stack-stubs==2.5.3"
+    assert "https://pypi.org/simple" in command
+
+
+def test_pypi_install_has_a_bounded_retry_limit() -> None:
+    failure = subprocess.CalledProcessError(1, ["uv"])
+    with patch("m5stubgen.upstream.subprocess.run", side_effect=failure) as run, \
+         patch("m5stubgen.upstream.time.sleep") as sleep, redirect_stdout(io.StringIO()), \
+         TestCase().assertRaises(subprocess.CalledProcessError):
+        install_published("2.5.3", Path("published"))
+    assert run.call_count == 11 and sleep.call_count == 10
+
+
+def test_pypi_install_validates_version_before_running_commands() -> None:
+    with patch("m5stubgen.upstream.subprocess.run") as run, TestCase().assertRaises(ValueError):
+        install_published("2.5.3;bad", Path("published"))
+    run.assert_not_called()
 
 
 def test_cli_writes_safe_outputs_and_summary() -> None:

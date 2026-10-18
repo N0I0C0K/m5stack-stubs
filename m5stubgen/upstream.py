@@ -7,6 +7,8 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
+import time
 import tomllib
 from typing import Any, Iterable
 from urllib.error import HTTPError
@@ -51,6 +53,8 @@ class ReleasePlan:
     ref: str
     version: str
     reason: str
+    verify: bool = False
+    record: bool = False
 
     def outputs(self) -> dict[str, str]:
         values = {
@@ -79,13 +83,17 @@ def plan_release(
         if not key or key[3] != -1:
             raise ValueError("unsupported firmware tag: %r" % tag)
         version = tag.removeprefix("v")
-        existing = [k for value in published_versions if (k := version_key(value)) is not None]
-        if any(k[:3] >= key[:3] for k in existing):
-            return ReleasePlan(False, False, True, tag, version, "Already published or superseded")
         publish = publish_enabled and (
             event_name == "schedule" or _boolean(inputs.get("publish"))
         )
-        return ReleasePlan(True, publish, True, tag, version, "New stable upstream release")
+        published_versions = list(published_versions)
+        existing = [k for value in published_versions if (k := version_key(value)) is not None]
+        if any(k[:3] >= key[:3] for k in existing):
+            recover = publish and version in published_versions and max(existing) == key
+            return ReleasePlan(False, False, True, tag, version, "Already published or superseded",
+                               verify=recover, record=recover)
+        return ReleasePlan(True, publish, True, tag, version, "New stable upstream release",
+                           verify=publish, record=publish)
 
     if event_name == "release":
         release = event["release"]
@@ -96,7 +104,8 @@ def plan_release(
             raise ValueError("unsupported package version: %r" % tag)
         marker = _FIRMWARE_MARKER.search(release.get("body") or "")
         ref = marker.group(1) if marker else "master"
-        return ReleasePlan(True, publish_enabled, False, ref, tag.removeprefix("v"), "Package release")
+        return ReleasePlan(True, publish_enabled, False, ref, tag.removeprefix("v"), "Package release",
+                           verify=publish_enabled)
 
     if event_name != "workflow_dispatch":
         raise ValueError("unsupported workflow event: %s" % event_name)
@@ -139,6 +148,25 @@ def set_version(path: Path, version: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def install_published(version: str, target: Path) -> None:
+    """Wait up to five minutes for PyPI's package index to expose a new upload."""
+    if version.startswith("v") or version_key(version) is None:
+        raise ValueError("invalid package version: %r" % version)
+    command = [
+        "uv", "pip", "install", "--target", str(target), "--no-deps", "--no-cache",
+        "--index-url", "https://pypi.org/simple", "m5stack-stubs==" + version,
+    ]
+    for attempt in range(11):
+        try:
+            subprocess.run(command, check=True)
+            return
+        except subprocess.CalledProcessError:
+            if attempt == 10:
+                raise
+            print("PyPI install not ready; retrying in 30 seconds", flush=True)
+            time.sleep(30)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -148,9 +176,15 @@ def main() -> None:
     version = sub.add_parser("set-version")
     version.add_argument("version")
     version.add_argument("--path", type=Path, default=Path("stubpkg/pyproject.toml"))
+    install = sub.add_parser("install-published")
+    install.add_argument("version")
+    install.add_argument("--target", type=Path, default=Path("published"))
     args = parser.parse_args()
     if args.command == "set-version":
         set_version(args.path, args.version)
+        return
+    if args.command == "install-published":
+        install_published(args.version, args.target)
         return
     if args.event_file is None:
         parser.error("plan requires --event-file or GITHUB_EVENT_PATH")
