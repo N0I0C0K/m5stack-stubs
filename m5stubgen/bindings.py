@@ -33,6 +33,11 @@ _FUNC_RE = re.compile(r"mp_obj_t\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*\{", re.S)
 _ARGTBL_RE = re.compile(r"const\s+mp_arg_t\s+allowed_args\[\]\s*=\s*\{(.*?)\};", re.S)
 _ENTRY_RE = re.compile(r"\{\s*MP_QSTR_(\w+)\s*,\s*([^,{}]+),", re.S)
 
+_CONTAINER_RE = re.compile(r"\bmp_obj_new_(tuple|list)\s*\(")
+_CONTAINER_RETURN_RE = re.compile(
+    r"\breturn\s+mp_obj_new_(tuple|list)\s*\(\s*(\d+)\s*,\s*(\w+)\s*\)\s*;"
+)
+
 #: binding-file suffix (``mpy_m5<suffix>.cpp``) -> M5 instance-type name.
 PREFIX_TO_TYPE: Dict[str, str] = {
     "gfx": "Display",
@@ -64,7 +69,87 @@ def _flag_type(flags: str, name: str) -> str:
     return _obj_type(name)
 
 
+def _split_c_args(text: str) -> Optional[List[str]]:
+    """Split commas outside nested calls and quoted C literals."""
+    parts: List[str] = []
+    stack: List[str] = []
+    quote = ""
+    escaped = False
+    start = 0
+    for i, ch in enumerate(text):
+        if quote:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == quote:
+                quote = ""
+        elif ch in "\"'":
+            quote = ch
+        elif ch in "([{":
+            stack.append(ch)
+        elif ch in ")]}":
+            if not stack or stack.pop() != {")": "(", "]": "[", "}": "{"}[ch]:
+                return None
+        elif ch == "," and not stack:
+            parts.append(text[start:i].strip())
+            start = i + 1
+    if quote or stack:
+        return None
+    if text[start:].strip():
+        parts.append(text[start:].strip())
+    return parts
+
+
+def _container_elems(body: str, name: str, n: int) -> Optional[List[str]]:
+    """Recover every element from the array passed to the returned container."""
+    m = re.search(
+        r"\bmp_obj_t\s+%s\s*\[\s*(\d*)\s*\]\s*=\s*\{([^{}]*)\}"
+        % re.escape(name), body, re.S,
+    )
+    if not m or (m.group(1) and int(m.group(1)) != n):
+        return None
+    parts = _split_c_args(m.group(2))
+    if parts is None or len(parts) != n:
+        return None
+    types = {
+        "bool": "bool", "float": "float", "int": "int",
+        "int_from_uint": "int", "int_from_ll": "int", "int_from_ull": "int",
+        "str": "str", "str_from_vstr": "str",
+    }
+    elems: List[str] = []
+    for part in parts:
+        cm = re.fullmatch(r"mp_obj_new_(\w+)\s*\((.*)\)", part, re.S)
+        if not cm or cm.group(1) not in types or _split_c_args(cm.group(2)) is None:
+            return None
+        elems.append(types[cm.group(1)])
+    return elems
+
+
 def _ret_type(body: str) -> str:
+    # Ignore constructor names in comments and literal contents.
+    body = re.sub(
+        r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|/\*.*?\*/',
+        lambda m: " " if m.group().startswith(("//", "/*")) else m.group()[0] * 2,
+        body, flags=re.S,
+    )
+    # Containers must be checked *before* the scalar constructors below: a
+    # tuple/list body also contains its element constructors (e.g. the three
+    # ``mp_obj_new_float`` of ``imu_getAccel``), so a scalar check would match
+    # first and mis-type the whole return as that element type.
+    container = _CONTAINER_RE.search(body)
+    if container:
+        kind = container.group(1)
+        calls = list(_CONTAINER_RETURN_RE.finditer(body))
+        if len(calls) != 1 or calls[0].group(1) != kind:
+            return kind
+        m = calls[0]
+        elems = _container_elems(body, m.group(3), int(m.group(2)))
+        if elems is None:
+            return kind
+        if kind == "tuple":
+            return "tuple[%s]" % (", ".join(elems) if elems else "()")
+        return "list[%s]" % " | ".join(sorted(set(elems))) if elems else "list"
     if "mp_obj_new_bool(" in body:
         return "bool"
     if "mp_obj_new_float(" in body:

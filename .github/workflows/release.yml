@@ -1,7 +1,7 @@
 name: Build & publish stubs
 
 # On a published GitHub Release: regenerate the stubs from the firmware C source,
-# build the `m5stack-stubs` package, and (once configured) publish it to PyPI.
+# validate and build the `m5stack-stubs` package, and publish it to PyPI.
 on:
   release:
     types: [published]
@@ -16,10 +16,8 @@ permissions:
   id-token: write              # required for PyPI Trusted Publishing (OIDC)
 
 env:
-  # Publishing master switch. Leave "false" until you've set up Trusted Publishing
-  # on PyPI for `m5stack-stubs`; flip to "true" here to start publishing on release.
-  # (Self-contained — no GitHub repo variable / environment to configure.)
-  PUBLISH_TO_PYPI: "false"
+  # Manual runs only build; release events publish using PyPI Trusted Publishing.
+  PUBLISH_TO_PYPI: "true"
 
 jobs:
   release:
@@ -34,10 +32,14 @@ jobs:
       - name: Generate stubs from the firmware C source (no device)
         run: |
           uv run m5stubgen fetch --ref "${{ github.event.inputs.ref || 'master' }}"
+          uv run m5stubgen gen
           uv run m5stubgen gen --out stubpkg
 
-      - name: Validate generated stub parses
-        run: python -c "import ast; ast.parse(open('stubpkg/M5.pyi', encoding='utf-8').read()); print('M5.pyi OK')"
+      - name: Validate bindings and generated return types
+        run: |
+          uv run python tests/test_bindings.py
+          uv run python tests/verify_distribution.py stubpkg/M5.pyi
+          uvx pyright
 
       - name: Set package version from the release tag
         if: github.event_name == 'release'
@@ -49,12 +51,16 @@ jobs:
       - name: Build sdist + wheel
         run: uv build stubpkg --out-dir dist
 
+      - name: Validate packaged stub
+        run: uv run python tests/verify_distribution.py dist/*.whl
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
 
       - name: Publish to PyPI
+        if: github.event_name == 'release' && env.PUBLISH_TO_PYPI == 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
