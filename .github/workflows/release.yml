@@ -1,27 +1,41 @@
 name: Build & publish stubs
 
-# On a published GitHub Release: regenerate the stubs from the firmware C source,
-# validate and build the `m5stack-stubs` package, and publish it to PyPI.
 on:
+  schedule:
+    - cron: "17 1 * * *"       # Daily at 09:17 Asia/Shanghai (UTC+8).
   release:
     types: [published]
-  workflow_dispatch:           # manual run -> builds only, never publishes
+  workflow_dispatch:
     inputs:
       ref:
-        description: "uiflow-micropython git ref to generate from"
+        description: "Firmware ref for a manual build (ignored when syncing upstream)"
         default: "master"
+      sync_upstream:
+        description: "Detect and build the latest stable official firmware release"
+        type: boolean
+        default: false
+      publish:
+        description: "Publish a new upstream version (requires sync_upstream)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
-  id-token: write              # required for PyPI Trusted Publishing (OIDC)
+
+concurrency:
+  group: m5stack-stubs-publication
+  cancel-in-progress: false
 
 env:
-  # Manual runs only build; release events publish using PyPI Trusted Publishing.
   PUBLISH_TO_PYPI: "true"
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write         # Record an upstream sync as a GitHub Release.
+      id-token: write         # PyPI Trusted Publishing; no long-lived token.
     steps:
       - uses: actions/checkout@v4
 
@@ -29,38 +43,79 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Generate stubs from the firmware C source (no device)
+      - name: Test release planning
+        run: uv run python tests/test_upstream.py
+
+      - name: Plan release
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run python -m m5stubgen.upstream plan
+
+      - name: Generate stubs from the selected firmware ref
+        if: steps.plan.outputs.build == 'true'
+        env:
+          FIRMWARE_REF: ${{ steps.plan.outputs.ref }}
         run: |
-          uv run m5stubgen fetch --ref "${{ github.event.inputs.ref || 'master' }}"
+          uv run m5stubgen fetch --ref "$FIRMWARE_REF"
           uv run m5stubgen gen
           uv run m5stubgen gen --out stubpkg
 
       - name: Validate bindings and generated return types
+        if: steps.plan.outputs.build == 'true'
         run: |
           uv run python tests/test_bindings.py
           uv run python tests/verify_distribution.py stubpkg/M5.pyi
           uvx pyright
 
-      - name: Set package version from the release tag
-        if: github.event_name == 'release'
-        run: |
-          VER="${GITHUB_REF_NAME#v}"
-          echo "stub package version = $VER"
-          sed -i "s/^version = .*/version = \"${VER}\"/" stubpkg/pyproject.toml
+      - name: Set package version
+        if: steps.plan.outputs.build == 'true'
+        env:
+          PACKAGE_VERSION: ${{ steps.plan.outputs.version }}
+        run: uv run python -m m5stubgen.upstream set-version "$PACKAGE_VERSION"
 
       - name: Build sdist + wheel
+        if: steps.plan.outputs.build == 'true'
         run: uv build stubpkg --out-dir dist
 
       - name: Validate packaged stub
-        run: uv run python tests/verify_distribution.py dist/*.whl
+        if: steps.plan.outputs.build == 'true'
+        env:
+          FIRMWARE_REF: ${{ steps.plan.outputs.ref }}
+        run: uv run python tests/verify_distribution.py dist/*.whl --firmware-ref "$FIRMWARE_REF"
 
       - uses: actions/upload-artifact@v4
+        if: steps.plan.outputs.build == 'true'
         with:
           name: dist
           path: dist/
 
       - name: Publish to PyPI
-        if: github.event_name == 'release' && env.PUBLISH_TO_PYPI == 'true'
+        if: steps.plan.outputs.publish == 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
+
+      - name: Verify published package
+        if: steps.plan.outputs.publish == 'true'
+        env:
+          PACKAGE_VERSION: ${{ steps.plan.outputs.version }}
+          FIRMWARE_REF: ${{ steps.plan.outputs.ref }}
+        run: |
+          uv pip install --target published --no-deps --no-cache --index-url https://pypi.org/simple "m5stack-stubs==$PACKAGE_VERSION"
+          uv run python tests/verify_distribution.py published/M5.pyi --firmware-ref "$FIRMWARE_REF"
+
+      # GITHUB_TOKEN-created releases do not trigger another release workflow.
+      - name: Record upstream release
+        if: steps.plan.outputs.publish == 'true' && steps.plan.outputs.automatic == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.plan.outputs.release_tag }}
+          FIRMWARE_REF: ${{ steps.plan.outputs.ref }}
+          PACKAGE_VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" \
+            --title "$PACKAGE_VERSION (UIFlow2 $FIRMWARE_REF)" \
+            --notes "Generated and validated from official firmware [$FIRMWARE_REF](https://github.com/m5stack/uiflow-micropython/releases/tag/$FIRMWARE_REF). Published to [PyPI](https://pypi.org/project/m5stack-stubs/$PACKAGE_VERSION/). Build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+
+          <!-- m5stubgen-firmware: $FIRMWARE_REF -->"

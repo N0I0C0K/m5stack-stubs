@@ -1,6 +1,6 @@
 [project]
 name = "m5stack-stubs"
-version = "0.0.0"  # set from the release tag in CI
+version = "0.0.0"  # set by the release workflow
 description = "Type stubs (.pyi) for the M5Stack UIFlow2 MicroPython firmware — M5 module"
 readme = "README.md"
 requires-python = ">=3.9"

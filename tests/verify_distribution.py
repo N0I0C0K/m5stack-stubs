@@ -7,8 +7,11 @@ from pathlib import Path
 from zipfile import ZipFile
 
 
-def verify_source(source: str) -> None:
+def verify_source(source: str, firmware_ref: str | None = None) -> None:
     tree = ast.parse(source)
+    if firmware_ref is not None:
+        assert "Firmware: uiflow-micropython %s @ " % firmware_ref in (ast.get_docstring(tree) or ""), \
+            "packaged stub does not match the selected firmware ref"
     expected = {
         "_IMU": {
             "getAccel": "tuple[float, float, float]",
@@ -39,13 +42,15 @@ def verify_source(source: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("path", type=Path)
-    path = parser.parse_args().path
+    parser.add_argument("--firmware-ref")
+    args = parser.parse_args()
+    path = args.path
     if path.suffix == ".whl":
         with ZipFile(path) as wheel:
             source = wheel.read("M5.pyi").decode("utf-8")
     else:
         source = path.read_text(encoding="utf-8")
-    verify_source(source)
+    verify_source(source, args.firmware_ref)
     print("verified tuple annotations:", path)
 
 
